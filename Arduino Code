@@ -1,0 +1,140 @@
+/*Nome do dispositivo: DFGI - Detector de Fumaça e Gases Inflamáveis.
+ *Desenvolvido por: Igor Matheus e Leonardo Chianca - Alunos do primeiro período
+ *do curso de Engenharia de Computação - UFPB .
+ *Aplicação: dispositivo que detecta fumaça e gases inflamáveis, acionando um alarme
+ *e eviando um SMS caso a quantidade destes seja muito alta. Também mede a
+ *temperatura do ambiente e umidade do ar em tempo real, mostrando tudo no display.
+ */
+
+#include "LiquidCrystal_I2C.h" //Biblioteca para utilizar o display LCD.
+#include "Wire.h" //Biblioteca auxiliar para acessar o dispositivo I2C do display.
+#include "DHT.h" //Biblioteca para utilizar o sensor de temperatura e umidade DHT11.
+#include "SoftwareSerial.h" //Biblioteca para simular que portas digitais funcionem como portas seriais.
+
+#define MQ2_PIN A0 //Define o sensor de gás e fumaça MQ2 na porta analógica A0.
+#define DHT_PIN A1 //Define o sensor DHT11 na porta analógica A1.
+#define DHT_TYPE DHT11 //Define o sensor DHT11.
+#define BUZZER 5 //Define o buzzer na porta digital 5.
+#define LED_VERM 6 //Define o LED vermelho na porta digital 6.
+#define LED_VERDE 7 //Define o LED verde na porta digital 7.
+#define NIVEL_SENSOR 170 //define o nível máximo de gás para indicar vazamento.
+
+LiquidCrystal_I2C lcd(0x27, 16, 2); //Define o tipo de display LCD.
+DHT dht(DHT_PIN, DHT_TYPE); //Define o tipo de sensor DHT.
+SoftwareSerial serialGSM(9, 8); //Define que os pinos TX e RX do GSM ficarão, respectivamente nas portas digitais 9 e 8.
+
+void sensorGas(int gas);
+void sensorTemperatura(int h, int t);
+void situacaoAmbiente();
+void enviaSMS(String telefone, String mensagem);
+void configuraGSM();
+
+bool temSMS = false;
+
+void setup(){
+  //Define os pinos de leitura dos sensores como entrada.
+  pinMode(MQ2_PIN, INPUT);
+  pinMode(DHT_PIN, INPUT);
+  
+  //Define os pinos dos LEDs e buzzer como saída.
+  pinMode(LED_VERM, OUTPUT);
+  pinMode(LED_VERDE, OUTPUT);
+  pinMode(BUZZER, OUTPUT);
+
+  //Inicializa a comunicação serial.
+  Serial.begin(9600);
+  serialGSM.begin(9600);
+  
+  //Inicializa o display LCD e o sensor DHT11.
+  lcd.init();
+  lcd.setBacklight(HIGH);
+  dht.begin(); 
+
+  configuraGSM();
+}
+
+void loop(){ 
+  situacaoAmbiente(); //Chama a função que mostra a situação geral do ambiente.
+
+  if(analogRead(MQ2_PIN) >= NIVEL_SENSOR && temSMS == false){
+    enviaSMS("84996977760", "Vazamento detectado!"); //Envia SMS para um determinado número de telefone.
+    temSMS = true;
+  }
+
+  if(analogRead(MQ2_PIN) < NIVEL_SENSOR && temSMS == true){
+    enviaSMS("84996977760", "Vazamento contido!"); //Envia SMS para um determinado número de telefone.
+    temSMS = false;
+  }
+}
+
+//Função que envia SMS para determinado número de telefone.
+void enviaSMS(String telefone, String mensagem){
+  serialGSM.print("AT+CMGS=\"" + telefone + "\"\n");
+  serialGSM.print(mensagem + "\n");
+  serialGSM.print((char)26);
+}
+
+//Função para configurar o GSM para enviar SMS.
+void configuraGSM() {
+   serialGSM.print("AT+CMGF=1\n;AT+CNMI=2,2,0,0,0\n;ATX4\n;AT+COLP=1\n"); 
+}
+
+//Função que recebe como parâmetro a leitura do sensor MQ2 e imprime no display se há vazamento ou não, bem como controla os LEDs.
+void sensorGas(int gas){
+  //Verifica o nivel de gás/fumaça detectado.
+  if (gas >= NIVEL_SENSOR){
+    Serial.print(" GAS: ");
+    Serial.println(gas);
+    
+    lcd.setCursor(0,0);
+    lcd.print("Vaz. Detectado !");
+    
+    //Liga o buzzer e o LED vermelho e desliga o LED verde.
+    digitalWrite(LED_VERDE, LOW);
+    digitalWrite(LED_VERM, HIGH);
+    tone(BUZZER, 750);
+    delay(1000);
+    noTone(BUZZER);
+  }else{
+    Serial.print("GAS: ");
+    Serial.println(gas);
+    
+    lcd.setCursor(0,0);
+    lcd.print("Sem Vazamento :)");
+    
+    //Desliga o buzzer e o LED vermelho e acende o LED verde.
+    digitalWrite(LED_VERM, LOW);
+    digitalWrite(LED_VERDE, HIGH);
+    noTone(BUZZER);  
+  }
+    delay(100);
+}
+
+//Função que recebe como parâmetros a leitura de umidade e temperatura do sensor DHT11 e imprime as respectivas informações no display.
+void sensorTemperatura(int h, int t){
+  if(isnan(t) || isnan(h)){
+    lcd.setCursor(0,1);
+    lcd.print("Leitura Falha");
+  }else{
+    Serial.print("Temperatura: ");
+    Serial.print(t);
+    Serial.println(" *C");
+    Serial.print(" Umidade: ");
+    Serial.print(h);
+    Serial.println("%");
+    
+    lcd.setCursor(0,1);
+    lcd.print("T: ");
+    lcd.print(t);
+    lcd.print(" C");
+    lcd.print("  U: ");
+    lcd.print(h);
+    lcd.print("%");
+  }
+}
+
+//Função que chama as funções dos sensores MQ2 e DHT11, mostrando a situação geral do ambiente.
+void situacaoAmbiente(){
+  sensorGas(analogRead(MQ2_PIN));
+  sensorTemperatura(dht.readHumidity(), dht.readTemperature());
+}
